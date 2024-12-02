@@ -1,54 +1,53 @@
 
-
-
 inductive Term : Type where
 | var : Nat → Term
 | app : Term → Term → Term
 | lam : Term → Term
 
-inductive Ren : Type where
-| idR : Ren
-| compR : Ren → Ren → Ren
-| lift : Ren
+def Ren := Nat → Nat
 
-inductive Subst : Type where
-| idS : Subst
-| comp : Subst → Ren → Subst
-| cons : Term → Subst → Subst
+def Subst := Nat → Term
 
-infix:40 " ∘ " => Subst.comp
-notation "↑" => Ren.lift
-infix:80 " ⬝ " => Subst.cons
+def Ren.lift n := n+1
 
+def cons u (σ : Nat → α) := λ n ↦ if n = 0 then u else σ (n-1)
+
+infix:80 " ⬝ " => cons
+
+
+@[simp]
+def renVar (n : Nat) (ρ : Ren) : Nat := ρ n
+
+def renTerm (ρ : Ren) : Term → Term
+| .var n => .var $ renVar n ρ
+| .app t₁ t₂ => .app (renTerm ρ t₁) (renTerm ρ t₂)
+| .lam t => .lam (renTerm (0 ⬝ (Ren.lift ∘ ρ)) t)
+
+notation "↑" => renTerm Ren.lift
+
+def Subst.lift (σ : Subst) : Subst := .var 0 ⬝ (↑ ∘ σ)
+
+notation "⇑" => Subst.lift
+
+
+@[simp]
+def substVar (n : Nat) (σ : Subst) : Term := σ n
+
+def idS := λ n ↦ Term.var n
 set_option hygiene false
 
 -- idk about these precedences
 notation t:60 " ⟨ " s:60 " ⟩ " => (subst s t)
 
-def renVar (n : Nat) : Ren → Nat
-| .idR => n
-| .compR ρ₁ ρ₂ => renVar (renVar n ρ₁) ρ₂
-| ↑ => n+1
-
-def renTerm (ρ : Ren) : Term → Term
-| .var n => .var $ renVar n ρ
-| .app t₁ t₂ => .app (renTerm ρ t₁) (renTerm ρ t₂)
-| .lam t => .lam (renTerm (.compR ρ ↑) t)
-
-def substVar (n : Nat) : Subst → Term
-| .idS => .var n
-| t ⬝ σ => if n = 0 then t else substVar (n-1) σ
-| .comp σ ρ => (renTerm ρ (substVar n σ))
-
 def subst (σ : Subst) : Term → Term
 | .var n => substVar n σ
 | .app t₁ t₂ => .app (t₁⟨σ⟩) (t₂⟨σ⟩)
-| .lam t => .lam (t⟨ (.var 0) ⬝ (σ ∘ ↑) ⟩)
+| .lam t => .lam (t⟨ ⇑ σ ⟩)
 
 notation t:60 " ⟶ " t':60 => (Red t t')
 
 inductive Red : Term → Term → Type where
-| beta : (.app (.lam t) u) ⟶ t⟨u ⬝ .idS⟩
+| beta : (.app (.lam t) u) ⟶ t⟨u ⬝ idS⟩
 | congApp₁ : t ⟶ t' → (.app t u) ⟶ (.app t' u)
 | congApp₂ : u ⟶ u' → (.app t u) ⟶ (.app t u')
 | congLam : t ⟶ t' → (.lam t) ⟶ (.lam t')
@@ -70,7 +69,7 @@ end
 
 -- Weak head expansion: a family of "necessary reductions for normalization"
 inductive WeakHeadExp : Term → Term → Term → Type where
-| headWH : WeakHeadExp (.app (.lam t) u) (t⟨u⬝.idS⟩) u
+| headWH : WeakHeadExp (.app (.lam t) u) (t⟨u⬝idS⟩) u
 | appWH : WeakHeadExp t t' u → WeakHeadExp (.app t v) (.app t' v) u
 
 inductive SN : Term → Type where
@@ -97,77 +96,143 @@ def interpTy : Ty → Term → Type
 | .base => SN
 | ty₁ ⇒ ty₂ => λ t ↦ ∀ u, ⟦ty₁⟧ u → ⟦ty₂⟧ (.app t u)
 
-def compRenL (ρ : Ren) (σ: Subst) : Subst :=
-match ρ, σ with
-| .idR, _ => σ
-| ↑, _⬝ σ' => σ'
-| .compR ρ₁ ρ₂, _ => compRenL ρ₁ (compRenL ρ₂ σ)
-| _, .idS => .comp .idS ρ
-| ρ, .comp σ' ρ' => .comp (compRenL ρ σ') ρ' --ugh
 
-def compSubst (σ τ : Subst) : Subst :=
-match σ, τ with
-| u⬝σ', τ => u⟨τ⟩ ⬝ (compSubst σ' τ)
-| .idS, _ => τ
-| _, .idS => σ
-| .comp σ' ρ, τ => compSubst σ' (compRenL ρ τ)
 
-theorem subst_var_comp : subst σ (substVar x τ) = substVar x (compSubst τ σ) :=
-by sorry
+theorem Function.comp_assoc : f ∘ g ∘ h = (f ∘ g) ∘ h :=
+by funext; simp
 
-theorem comp_assoc : t⟨compSubst σ (τ ∘ ρ)⟩ = t⟨(compSubst σ τ ∘ ρ)⟩ :=
+@[simp]
+def Subst.comp (σ τ : Subst) : Subst :=
+  λ n ↦ (σ n)⟨τ⟩
+
+infix:81 " ⟫ " => Subst.comp
+
+theorem subst_var_comp : (substVar x τ)⟨σ⟩ = substVar x (τ ⟫ σ) :=
 by
-  cases σ <;> simp [compSubst]
-  case comp => sorry
-  case cons t' σ' => sorry
+  simp [substVar, subst, Subst.comp]
 
-theorem subst_comp : t⟨σ⟩⟨τ⟩ = t⟨compSubst σ τ⟩ :=
+@[simp]
+theorem cons_ren : σ ∘ (v ⬝ ρ) = (σ v) ⬝ (σ ∘ ρ) :=
+by
+  funext x; simp [cons]; split <;> trivial
+
+theorem cons_comp : (t ⬝ σ) ⟫ τ = t⟨τ⟩ ⬝ (σ ⟫ τ) :=
+by
+  funext x
+  simp [Subst.comp, subst, cons]
+  split <;> simp
+
+@[simp]
+theorem cons_lift : (t ⬝ σ) ∘ Ren.lift = σ :=
+by
+  funext x; simp [cons, Ren.lift]
+  split
+  case h.inl => contradiction
+  case h.inr => trivial
+
+theorem renTerm_comp_aux : renTerm ρ₁ (renTerm ρ₂ t) = renTerm (ρ₁ ∘ ρ₂) t :=
+by
+  cases t <;> simp [renTerm]
+  case app => constructor <;> apply renTerm_comp_aux
+  case lam =>
+    rw [renTerm_comp_aux]; simp [cons, Function.comp_assoc]
+
+theorem renTerm_comp : (renTerm ρ₁) ∘ (renTerm ρ₂) = renTerm (ρ₁ ∘ ρ₂) :=
+by
+  funext t; apply renTerm_comp_aux
+
+theorem comp_assoc_ren_aux : (renTerm ρ t)⟨σ⟩ = t⟨σ ∘ ρ⟩ :=
+by
+  cases t <;> simp [renTerm, subst]
+  case app => constructor <;> apply comp_assoc_ren_aux
+  case lam =>
+    rw [comp_assoc_ren_aux]
+    simp [Subst.lift]
+    simp [cons]
+    rw [Function.comp_assoc, cons_lift]
+    rw [← Function.comp_assoc]
+
+theorem comp_assoc_ren : renTerm ρ ∘ τ ⟫ σ = τ ⟫ σ ∘ ρ :=
+by
+  funext; simp [renTerm, subst]
+  apply comp_assoc_ren_aux
+
+theorem congr_arg₂ (x x' : α) (y y' : β) (f : α → β → γ): x = x' → y = y' → f x y = f x' y' :=
+by intros r₁ r₂; rw [r₁, r₂]
+
+theorem ren_subst_assoc_aux : renTerm ρ (t⟨σ⟩) = t⟨renTerm ρ ∘ σ⟩ :=
+by
+  cases t <;> simp [subst, renTerm]
+  case app => constructor <;> apply ren_subst_assoc_aux
+  case lam =>
+    rw [ren_subst_assoc_aux]
+    simp [Subst.lift, renTerm, cons]
+    apply congr_arg₂ <;> try trivial
+    apply congr_arg₂; trivial
+    -- FIXME: this is ugly
+    rw [Function.comp_assoc, renTerm_comp]; simp
+    rw [Function.comp_assoc, renTerm_comp]
+
+theorem ren_subst_assoc : renTerm ρ ∘ (σ ⟫ τ) = σ ⟫ (renTerm ρ ∘ τ) :=
+by
+  funext t; simp [Function.comp]
+  rw [ren_subst_assoc_aux]
+
+theorem shift_comp : ⇑ (σ ⟫ τ) = (⇑ σ) ⟫ (⇑ τ) :=
+by
+  simp [Subst.lift, cons_comp, subst, cons]
+  rw [comp_assoc_ren, cons_lift]
+  apply congr_arg₂; trivial
+  rw [ren_subst_assoc]
+
+theorem subst_subst_comp : t⟨τ⟩⟨σ⟩ = t⟨τ ⟫ σ⟩ :=
+by
+  cases t <;> simp [subst, Subst.comp]
+  case app => constructor <;> apply subst_subst_comp
+  case lam => rw [subst_subst_comp, shift_comp]
+
+theorem comp_assoc : (σ ⟫ τ) ⟫ φ = σ ⟫ (τ ⟫ φ) :=
+by
+  funext
+  simp [Subst.comp]
+  apply subst_subst_comp
+
+theorem subst_comp : t⟨σ⟩⟨τ⟩ = t⟨σ ⟫ τ⟩ :=
 by
   cases t <;> simp [subst]
-  case var => apply subst_var_comp
   case app => constructor <;> apply subst_comp
-  case lam =>
-    rw [subst_comp]
-    simp [compSubst, subst, substVar, compRenL]
-    sorry
+  case lam => rw [subst_comp, shift_comp]
 
-theorem substShift : t⟨.var 0 ⬝ (σ ∘ ↑)⟩ = t⟨σ⟩ :=
+@[simp]
+theorem liftIdS : ⇑ idS = idS :=
 by
-  revert σ
-  cases t <;> simp [subst] <;> intros σ
-  case var => simp [substVar]; sorry
-  case app => sorry
-  case lam => sorry
+  funext t
+  cases t <;> simp [idS, Subst.lift, cons, Ren.lift, renTerm]
+  apply Nat.sub_succ
 
-theorem substIdS : t⟨.idS⟩ = t :=
+@[simp]
+theorem substIdS : t⟨idS⟩ = t :=
 by
-  cases t <;> simp [subst, substVar]
+  cases t <;> simp [subst, substVar, idS]
   case app => constructor <;> apply substIdS
-  case lam => sorry
+  case lam => apply substIdS
 
-theorem compSubstIdL : compSubst .idS σ = σ :=
+theorem compIdL : Subst.comp idS σ = σ :=
 by
-  cases σ <;> simp [compSubst]
+  funext; simp [Subst.comp, idS, subst, substVar]
 
-theorem compSubstIdR : compSubst σ .idS = σ :=
+theorem compIdR : σ ⟫ idS = σ :=
 by
-  cases σ <;> simp [compSubst]
-  case cons =>
-    constructor
-    . simp [subst]
-    sorry
+  funext x; simp [Subst.comp]
 
-theorem comp_lift : compSubst (.var 0 ⬝ (σ ∘ ↑)) (t ⬝ .idS) = t ⬝ σ :=
+theorem comp_lift : (⇑ σ) ⟫ (t ⬝ idS) = t ⬝ σ :=
 by
-  simp [compSubst, compRenL, subst, substVar]
-  apply compSubstIdR
-
-theorem subst_subst : t⟨(.var 0 ⬝ (σ ∘ ↑))⟩⟨u⬝.idS⟩ = t⟨u⬝σ⟩ :=
-by
-  rw [subst_comp, comp_lift]
+  simp [Subst.lift, subst, cons, cons_comp]
+  rw [comp_assoc_ren]
+  rw [cons_lift, compIdR]
 
 theorem app_subst : (.app ((.lam t)⟨σ⟩) u) ⟶ t⟨u⬝σ⟩ :=
 by
-  rw [← subst_subst]
   simp [subst]
+  rw [← comp_lift, ← subst_comp]
   apply Red.beta
