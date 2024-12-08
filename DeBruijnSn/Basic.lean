@@ -58,23 +58,24 @@ inductive RedStar : Term → Term → Type :=
 | done : t ⟶* t
 | step : t₁ ⟶ t₂ → t₂ ⟶* t₃ → t₁ ⟶* t₃
 
-mutual
-inductive Neutral : Term → Type where
-| varNe : Neutral $ .var n
-| appNe : Neutral ne → Normal t → Neutral (.app ne t)
-inductive Normal : Term → Type where
-| neutralNorm : Neutral ne → Normal ne
-| lambdaNorm : Normal t → Normal (.lam t)
-end
-
 -- Weak head expansion: a family of "necessary reductions for normalization"
 inductive WeakHeadExp : Term → Term → Term → Type where
 | headWH : WeakHeadExp (.app (.lam t) u) (t⟨u⬝idS⟩) u
 | appWH : WeakHeadExp t t' u → WeakHeadExp (.app t v) (.app t' v) u
 
+-- A little strange to *define* SN like this...
+-- but these are all *true* statements about strongly normalizing
+-- terms (and we claim that they are sufficient conditions as well)
+mutual
 inductive SN : Term → Type where
-| normSN : Normal t → SN t
-| weakHeadSN : SN t' → SN u → WeakHeadExp t t' u → SN t
+| normLambda : SN t → SN (.lam t)
+| normNE : NE t → SN t
+| normVarApp : SN (.app t (.var n)) → SN t
+| normWH : WeakHeadExp t t' u → SN t' → SN u → SN t
+inductive NE : Term → Type where
+| varNE : NE (.var n)
+| appNE : NE n → SN t → NE (.app n t)
+end
 
 inductive Ty where
 | base : Ty
@@ -92,11 +93,14 @@ inductive TypeTerm : Ctx → Term → Ty → Type where
 
 notation "⟦" ty "⟧" => (interpTy ty)
 
+@[simp]
 def interpTy : Ty → Term → Type
 | .base => SN
 | ty₁ ⇒ ty₂ => λ t ↦ ∀ u, ⟦ty₁⟧ u → ⟦ty₂⟧ (.app t u)
 
+def validSubst (Γ : Ctx) (σ : Subst) := ∀ n A, Γ.get? n = .some A → ⟦A⟧ (σ n)
 
+infix:85 " ⊧ " => validSubst
 
 theorem Function.comp_assoc : f ∘ g ∘ h = (f ∘ g) ∘ h :=
 by funext; simp
@@ -217,10 +221,17 @@ by
   case app => constructor <;> apply substIdS
   case lam => apply substIdS
 
-theorem compIdL : Subst.comp idS σ = σ :=
+
+theorem renTerm_IdS : t⟨idS ∘ ρ⟩ = renTerm ρ t :=
+by
+  rw [← comp_assoc_ren_aux]; simp
+
+@[simp]
+theorem compIdL : idS ⟫ σ = σ :=
 by
   funext; simp [Subst.comp, idS, subst, substVar]
 
+@[simp]
 theorem compIdR : σ ⟫ idS = σ :=
 by
   funext x; simp [Subst.comp]
@@ -236,3 +247,63 @@ by
   simp [subst]
   rw [← comp_lift, ← subst_comp]
   apply Red.beta
+
+theorem wh_comp : WeakHeadExp t t' u → SN u → ⟦A⟧ t' → ⟦A⟧ t :=
+by
+  cases A <;> simp
+  case base =>
+    intros wh sn_u sn_t'; apply SN.normWH (u := u) <;> trivial
+  case arrow A₁ A₂ =>
+    intros wh sn_u comp_t' u' comp_u'
+    apply wh_comp; apply WeakHeadExp.appWH; trivial
+    . trivial
+    . apply comp_t' <;> trivial
+
+
+
+mutual
+theorem sn_comp : ⟦A⟧ t → SN t :=
+by
+  cases A <;> simp
+  case base => intros; trivial
+  case arrow =>
+    intro comp_t
+    apply SN.normVarApp
+    apply sn_comp; apply comp_t
+    apply neutral_comp
+    constructor; exact 0
+
+theorem neutral_comp : NE n → ⟦A⟧ n :=
+by
+  cases A <;> simp
+  case base => intro ne_n; constructor; trivial
+  case arrow =>
+    intros neutral_n u comp_u
+    have norm_u := sn_comp comp_u
+    apply neutral_comp
+    constructor <;> trivial
+end
+
+theorem soundness (d : Γ ⊢ t :+ A) (valid : Γ ⊧ σ): ⟦A⟧ (t⟨σ⟩) :=
+by
+  cases d <;> simp [subst]
+  case varTy n h => apply valid; trivial
+  case appTy T t u tyT tyU =>
+    have ihT : ⟦T ⇒ A⟧ (t⟨σ⟩) := by apply soundness <;> trivial
+    have ihU : ⟦T⟧ (u⟨σ⟩) := by apply soundness <;> trivial
+    simp at ihT
+    apply (ihT (u⟨σ⟩) ihU)
+  case lamTy B A t tyT =>
+    intros u compU
+    have wh_t : WeakHeadExp (Term.app (Term.lam (t⟨⇑ σ⟩)) u) (t⟨u ⬝ σ⟩) u :=
+    by
+      rw [← comp_lift,← subst_comp]
+      apply WeakHeadExp.headWH
+    apply wh_comp wh_t
+    . apply sn_comp; trivial
+    . apply soundness; trivial
+      intro v; cases v <;> intros; simp [cons, List.get?] at *
+      case a.valid.zero A' eq => exact eq ▸ compU
+      case a.valid.succ =>
+        simp [cons, List.get?] at *
+        apply valid; trivial
