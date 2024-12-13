@@ -307,3 +307,20 @@ by
       case a.valid.succ =>
         simp [cons, List.get?] at *
         apply valid; trivial
+
+theorem idS_valid : Γ ⊧ idS :=
+by
+  intros n A _
+  apply neutral_comp; simp [idS]; constructor
+
+#print Ty
+
+theorem sn_idX : SN ((.app (.lam (.var 0)) (.var 0))⟨idS⟩) :=
+by
+  apply (@sn_comp .base)
+  apply @soundness (valid := @idS_valid [.base])
+  repeat constructor
+
+#print sn_idX
+
+#print soundness
