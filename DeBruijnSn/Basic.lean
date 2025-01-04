@@ -12,6 +12,9 @@ def Ren.lift n := n+1
 
 def cons u (σ : Nat → α) := λ n ↦ if n = 0 then u else σ (n-1)
 
+
+theorem cons_zero (u : α) (σ : Nat → α) : cons u σ 0 = u := by simp [cons]
+
 infix:80 " ⬝ " => cons
 
 
@@ -105,12 +108,12 @@ infix:85 " ⊧ " => validSubst
 theorem Function.comp_assoc : f ∘ g ∘ h = (f ∘ g) ∘ h :=
 by funext; simp
 
-@[simp]
 def Subst.comp (σ τ : Subst) : Subst :=
   λ n ↦ (σ n)⟨τ⟩
 
 infix:81 " ⟫ " => Subst.comp
 
+@[simp]
 theorem subst_var_comp : (substVar x τ)⟨σ⟩ = substVar x (τ ⟫ σ) :=
 by
   simp [substVar, subst, Subst.comp]
@@ -139,7 +142,7 @@ by
   cases t <;> simp [renTerm]
   case app => constructor <;> apply renTerm_comp_aux
   case lam =>
-    rw [renTerm_comp_aux]; simp [cons, Function.comp_assoc]
+    rw [renTerm_comp_aux]; simp [cons_zero, Function.comp_assoc]
 
 theorem renTerm_comp : (renTerm ρ₁) ∘ (renTerm ρ₂) = renTerm (ρ₁ ∘ ρ₂) :=
 by
@@ -152,13 +155,13 @@ by
   case lam =>
     rw [comp_assoc_ren_aux]
     simp [Subst.lift]
-    simp [cons]
+    simp [cons_zero]
     rw [Function.comp_assoc, cons_lift]
     rw [← Function.comp_assoc]
 
 theorem comp_assoc_ren : renTerm ρ ∘ τ ⟫ σ = τ ⟫ σ ∘ ρ :=
 by
-  funext; simp [renTerm, subst]
+  funext; simp [renTerm, subst, Subst.comp]
   apply comp_assoc_ren_aux
 
 theorem congr_arg₂ (x x' : α) (y y' : β) (f : α → β → γ): x = x' → y = y' → f x y = f x' y' :=
@@ -170,7 +173,7 @@ by
   case app => constructor <;> apply ren_subst_assoc_aux
   case lam =>
     rw [ren_subst_assoc_aux]
-    simp [Subst.lift, renTerm, cons]
+    simp [Subst.lift, renTerm, cons_zero]
     apply congr_arg₂ <;> try trivial
     apply congr_arg₂; trivial
     -- FIXME: this is ugly
@@ -179,19 +182,21 @@ by
 
 theorem ren_subst_assoc : renTerm ρ ∘ (σ ⟫ τ) = σ ⟫ (renTerm ρ ∘ τ) :=
 by
-  funext t; simp [Function.comp]
+  funext t; simp [Function.comp, Subst.comp]
   rw [ren_subst_assoc_aux]
+  apply congr_arg₂ <;> trivial
 
 theorem shift_comp : ⇑ (σ ⟫ τ) = (⇑ σ) ⟫ (⇑ τ) :=
 by
-  simp [Subst.lift, cons_comp, subst, cons]
+  simp [Subst.lift, cons_comp, subst, cons_zero]
   rw [comp_assoc_ren, cons_lift]
   apply congr_arg₂; trivial
   rw [ren_subst_assoc]
 
 theorem subst_subst_comp : t⟨τ⟩⟨σ⟩ = t⟨τ ⟫ σ⟩ :=
 by
-  cases t <;> simp [subst, Subst.comp]
+  cases t <;> simp [subst]
+  case var => simp [Subst.comp]
   case app => constructor <;> apply subst_subst_comp
   case lam => rw [subst_subst_comp, shift_comp]
 
@@ -204,6 +209,7 @@ by
 theorem subst_comp : t⟨σ⟩⟨τ⟩ = t⟨σ ⟫ τ⟩ :=
 by
   cases t <;> simp [subst]
+  case var => simp [Subst.comp]
   case app => constructor <;> apply subst_comp
   case lam => rw [subst_comp, shift_comp]
 
@@ -217,7 +223,8 @@ by
 @[simp]
 theorem substIdS : t⟨idS⟩ = t :=
 by
-  cases t <;> simp [subst, substVar, idS]
+  cases t <;> simp [subst, substVar]
+  case var => simp [idS]
   case app => constructor <;> apply substIdS
   case lam => apply substIdS
 
@@ -238,9 +245,9 @@ by
 
 theorem comp_lift : (⇑ σ) ⟫ (t ⬝ idS) = t ⬝ σ :=
 by
-  simp [Subst.lift, subst, cons, cons_comp]
+  simp [Subst.lift, subst, cons_comp]
   rw [comp_assoc_ren]
-  rw [cons_lift, compIdR]
+  rw [cons_lift, compIdR]; simp [cons_zero]
 
 theorem app_subst : (.app ((.lam t)⟨σ⟩) u) ⟶ t⟨u⬝σ⟩ :=
 by
@@ -313,7 +320,6 @@ by
   intros n A _
   apply neutral_comp; simp [idS]; constructor
 
-#print Ty
 
 theorem sn_idX : SN ((.app (.lam (.var 0)) (.var 0))⟨idS⟩) :=
 by
@@ -322,5 +328,7 @@ by
   repeat constructor
 
 #print sn_idX
+
+#reduce sn_idX
 
 #print soundness
