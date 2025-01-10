@@ -81,7 +81,7 @@ inductive NE : Term → Type where
 end
 
 inductive Ty where
-| retract : Ty
+| d : Ty
 | arrow : Ty → Ty → Ty
 
 infix:60 " ⇒ " => Ty.arrow
@@ -93,19 +93,20 @@ inductive TypeTerm : Ctx → Term → Ty → Type where
 | varTy : ∀ Γ A n, Γ.get? n = .some A →  Γ ⊢ .var n :+ A
 | appTy : ∀ Γ A B t u, Γ ⊢ t :+ A ⇒ B → Γ ⊢ u :+ A → Γ ⊢ .app t u :+ B
 | lamTy : ∀ Γ A t, (A :: Γ) ⊢ t :+ B → Γ ⊢ .lam t :+ A ⇒ B
-| unfoldTy : ∀ Γ t, Γ ⊢ t :+ .retract → Γ ⊢ t :+ .retract ⇒ .retract
-| foldTy : ∀ Γ t, Γ ⊢ t :+ .retract ⇒ .retract → Γ ⊢ t :+ .retract
+| unfoldTy : ∀ Γ t, Γ ⊢ t :+ .d → Γ ⊢ t :+ .d ⇒ .d
+| foldTy : ∀ Γ t, Γ ⊢ t :+ .d ⇒ .d → Γ ⊢ t :+ .d
 
 -- This axiom is false, of course. But it'll allow us to prove normalization
 -- in an interesting way.
--- FIXME: is this the right axiom?
-axiom foldType : ∀ P : Term → Type, (∀ t, P t → P t) → ∀ t, P t
+axiom foldType t : (∀ u, SN u → SN (.app t u)) → SN t
+-- This one is true but whatever
+axiom unfoldType t : SN t → (∀ u, SN u → SN (.app t u))
 
 notation "⟦" ty "⟧" => (interpTy ty)
 
 @[simp]
 def interpTy : Ty → Term → Type
-| .retract => SN
+| .d => SN
 | ty₁ ⇒ ty₂ => λ t ↦ ∀ u, ⟦ty₁⟧ u → ⟦ty₂⟧ (.app t u)
 
 def validSubst (Γ : Ctx) (σ : Subst) := ∀ n A, Γ.get? n = .some A → ⟦A⟧ (σ n)
@@ -265,7 +266,7 @@ by
 theorem wh_comp : WeakHeadExp t t' u → SN u → ⟦A⟧ t' → ⟦A⟧ t :=
 by
   cases A <;> simp
-  case retract =>
+  case d =>
     intros wh sn_u sn_t'; apply SN.normWH (u := u) <;> trivial
   case arrow A₁ A₂ =>
     intros wh sn_u comp_t' u' comp_u'
@@ -279,7 +280,7 @@ mutual
 theorem sn_comp : ⟦A⟧ t → SN t :=
 by
   cases A <;> simp
-  case retract => intros; trivial
+  case d => intros; trivial
   case arrow =>
     intro comp_t
     apply SN.normVarApp
@@ -290,7 +291,7 @@ by
 theorem neutral_comp : NE n → ⟦A⟧ n :=
 by
   cases A <;> simp
-  case retract => intro ne_n; constructor; trivial
+  case d => intro ne_n; constructor; trivial
   case arrow =>
     intros neutral_n u comp_u
     have norm_u := sn_comp comp_u
@@ -321,13 +322,16 @@ by
       case a.valid.succ =>
         simp [cons, List.get?] at *
         apply valid; trivial
-  case unfoldTy =>
+  case unfoldTy ih =>
     intros _ _
-    apply foldType -- This feels too nuclear
-    intros _ _; trivial
+    apply unfoldType;
+    apply (soundness ih); trivial
+    trivial
   case foldTy =>
-    apply sn_comp
-    apply soundness <;> trivial
+    apply foldType; intros
+    have ihT : ⟦Ty.d ⇒ Ty.d⟧ (t⟨σ⟩) := by apply soundness <;> trivial
+    simp at ihT; apply ihT; trivial
+  termination_by soundness d valid => d
 
 
 theorem idS_valid : Γ ⊧ idS :=
@@ -338,20 +342,21 @@ by
 
 theorem sn_idX : SN ((.app (.lam (.var 0)) (.var 0))⟨idS⟩) :=
 by
-  apply (@sn_comp .retract)
-  apply @soundness (valid := @idS_valid [.retract])
+  apply (@sn_comp .d)
+  apply @soundness (valid := @idS_valid [.d])
   repeat constructor
 
 #print sn_idX
 
-#reduce sn_idX
+-- timeout here!
+-- #reduce sn_idX
 
 def δ : Term := .lam (.app (.var 0) (.var 0))
 
 theorem sn_Omega : SN ((.app δ δ)⟨idS⟩) :=
 by
-  apply (@sn_comp .retract)
-  apply @soundness (valid := @idS_valid [.retract])
+  apply (@sn_comp .d)
+  apply @soundness (valid := @idS_valid [.d])
   constructor
   case a.d.a =>
     constructor
@@ -366,3 +371,5 @@ by
       constructor
       case a => apply TypeTerm.unfoldTy; apply TypeTerm.varTy; simp [List.get?]; rfl
       case a => apply TypeTerm.varTy; simp [List.get?]
+
+-- #reduce sn_Omega
