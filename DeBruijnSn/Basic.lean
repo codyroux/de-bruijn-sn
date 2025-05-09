@@ -74,7 +74,7 @@ inductive SN : Term → Type where
 | normLambda : SN t → SN (.lam t)
 | normNE : NE t → SN t
 | normVarApp : SN (.app t (.var n)) → SN t
-| normWH : WeakHeadExp t t' u → SN t' → SN u → SN t
+| normWH : WeakHeadExp t t' u → SN u → SN t' → SN t
 inductive NE : Term → Type where
 | varNE : NE (.var n)
 | appNE : NE n → SN t → NE (.app n t)
@@ -96,9 +96,21 @@ inductive TypeTerm : Ctx → Term → Ty → Type where
 
 notation "⟦" ty "⟧" => (interpTy ty)
 
+axiom BaseSem : Term → Type
+
+
+axiom neBaseSem : ∀ ne : Term, NE ne → BaseSem ne
+axiom snBaseSem : ∀ t : Term, BaseSem t → SN t
+axiom whBaseSem : ∀ t t' u : Term,
+  WeakHeadExp t t' u → SN u → BaseSem t' → BaseSem t
+
+axiom neSN : ∀ (t : Term) (p : NE t) , snBaseSem t (neBaseSem t p) = .normNE p
+axiom whSN : ∀ (t t' u : Term) (p : WeakHeadExp t t' u) (sn_u : SN u) (base_t' : BaseSem t'),
+  snBaseSem t (whBaseSem t t' u p sn_u base_t') = .normWH p sn_u (snBaseSem t' base_t')
+
 @[simp]
 def interpTy : Ty → Term → Type
-| .base => SN
+| .base => BaseSem
 | ty₁ ⇒ ty₂ => λ t ↦ ∀ u, ⟦ty₁⟧ u → ⟦ty₂⟧ (.app t u)
 
 def validSubst (Γ : Ctx) (σ : Subst) := ∀ n A, Γ.get? n = .some A → ⟦A⟧ (σ n)
@@ -259,20 +271,18 @@ theorem wh_comp : WeakHeadExp t t' u → SN u → ⟦A⟧ t' → ⟦A⟧ t :=
 by
   cases A <;> simp
   case base =>
-    intros wh sn_u sn_t'; apply SN.normWH (u := u) <;> trivial
+    exact (whBaseSem t t' u)
   case arrow A₁ A₂ =>
     intros wh sn_u comp_t' u' comp_u'
     apply wh_comp; apply WeakHeadExp.appWH; trivial
     . trivial
     . apply comp_t' <;> trivial
 
-
-
 mutual
 theorem sn_comp : ⟦A⟧ t → SN t :=
 by
   cases A <;> simp
-  case base => intros; trivial
+  case base => intros; apply snBaseSem; trivial
   case arrow =>
     intro comp_t
     apply SN.normVarApp
@@ -283,7 +293,7 @@ by
 theorem neutral_comp : NE n → ⟦A⟧ n :=
 by
   cases A <;> simp
-  case base => intro ne_n; constructor; trivial
+  case base => intro ne_n; apply neBaseSem; trivial
   case arrow =>
     intros neutral_n u comp_u
     have norm_u := sn_comp comp_u
@@ -315,20 +325,39 @@ by
         simp [cons, List.get?] at *
         apply valid; trivial
 
+
 theorem idS_valid : Γ ⊧ idS :=
 by
   intros n A _
   apply neutral_comp; simp [idS]; constructor
 
 
-theorem sn_idX : SN ((.app (.lam (.var 0)) (.var 0))⟨idS⟩) :=
+theorem sn_idX : SN ((.app (.lam (.var 0)) (.var 1))⟨idS⟩) :=
 by
   apply (@sn_comp .base)
-  apply @soundness (valid := @idS_valid [.base])
+  apply @soundness (valid := @idS_valid [.base, .base])
   repeat constructor
+
 
 #print sn_idX
 
 #reduce sn_idX
+
+
+theorem sn_idX_nf : sn_idX =
+  @SN.normWH
+  (Term.app (Term.lam (Term.var 0)) (Term.var 1))
+  (Term.var 1) (Term.var 1)
+  WeakHeadExp.headWH
+  (SN.normNE NE.varNE) (SN.normNE NE.varNE) :=
+by
+  have h : sn_idX =
+   snBaseSem (Term.app (Term.lam (Term.var 0)) (Term.var 1))
+   (whBaseSem (Term.app (Term.lam (Term.var 0)) (Term.var 1)) (Term.var 1) (Term.var 1) WeakHeadExp.headWH
+    (snBaseSem (Term.var 1) (neBaseSem (Term.var 1) NE.varNE)) (neBaseSem (Term.var 1) NE.varNE)) :=
+    by eq_refl
+  rw [whSN, neSN] at h
+  trivial
+
 
 #print soundness
